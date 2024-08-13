@@ -1,0 +1,38 @@
+name: Docker Pull
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  new-issue-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Docker Pull
+        run: |
+          sudo -v; curl https://rclone.org/install.sh | sudo bash
+          rclone version
+          issue_title="${{ github.event.issue.title }}"
+          issue_number="${{ github.event.issue.number }}"
+          if [[ $issue_title =~ ^docker\ pull\ ([a-zA-Z0-9\._-]+(/?[a-zA-Z0-9\._-]+)?(:[a-zA-Z0-9\._-]+)?)$ ]]; then
+            echo "Issue title is valid."
+            $issue_title
+            image_name=${BASH_REMATCH[1]}
+            save_image_name=${image_name//:/_}
+            save_image_name=${save_image_name//\//_}
+            docker save $image_name | gzip > ./$save_image_name.tar.gz
+            rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
+            gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following link: https://e5.1881997.xyz/DockerPull/$issue_number/$save_image_name.tar.gz"
+          else
+            echo "Issue title is invalid."
+            exit 1
+          fi
+        shell: bash
+        env:
+          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+          GH_TOKEN: ${{ secrets.PAT }}
+          RCLONE_CONFIG: ./config/rclone.conf
+          
+
