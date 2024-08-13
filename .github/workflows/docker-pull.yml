@@ -12,6 +12,9 @@ jobs:
 
       - name: Docker Pull
         run: |
+          set -e
+          trap 'last_command=$BASH_COMMAND; error_message=$(echo "Error on $last_command: $?"); gh issue comment ${{ github.event.issue.number }} -b "$error_message"' ERR
+          
           sudo -v; curl https://rclone.org/install.sh | sudo bash
           rclone version
           issue_title="${{ github.event.issue.title }}"
@@ -27,6 +30,7 @@ jobs:
             gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following link: https://e5.1881997.xyz/DockerPull/$issue_number/$save_image_name.tar.gz"
           else
             echo "Issue title is invalid."
+            gh issue comment ${{ github.event.issue.number }} -b "Issue title is invalid."
             exit 1
           fi
         shell: bash
