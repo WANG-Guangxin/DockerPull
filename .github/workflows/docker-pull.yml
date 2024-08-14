@@ -19,10 +19,10 @@ jobs:
           rclone version
           issue_title="${{ github.event.issue.title }}"
           issue_number="${{ github.event.issue.number }}"
-          if [[ $issue_title =~ ^docker\ pull\ ([a-zA-Z0-9._-]+\/)*([a-zA-Z0-9._-]+)(:[a-zA-Z0-9._-]+)?$ ]]; then
+          if [[ $issue_title =~ ^docker\ pull\ (.+)$ ]]; then
             echo "Issue title is valid."
             $issue_title
-            image_name="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+            image_name="${BASH_REMATCH[1]}"
             save_image_name=${image_name//[:\/]/_}
             docker save $image_name | gzip > ./$save_image_name.tar.gz
             rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
