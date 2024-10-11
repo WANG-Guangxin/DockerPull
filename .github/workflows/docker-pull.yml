@@ -23,7 +23,8 @@ jobs:
             save_image_name=${image_name//[:\/]/_}
             docker save $image_name | gzip > ./$save_image_name.tar.gz
             rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
-            gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following link: https://e5.1881997.xyz/DockerPull/$issue_number/$save_image_name.tar.gz"
+            share_link=$(rclone link E5:/DockerPull/$issue_number/$save_image_name.tar.gz)
+            gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following links: $share_link"
           else
             echo "Issue title is invalid."
             exit 1
