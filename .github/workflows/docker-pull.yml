@@ -19,12 +19,48 @@ jobs:
           if [[ $issue_title =~ ^docker\ pull\ (.+)$ ]]; then
             echo "Issue title is valid."
             $issue_title
-            image_name="${BASH_REMATCH[1]}"
-            save_image_name=${image_name//[:\/]/_}
-            docker save $image_name | gzip > ./$save_image_name.tar.gz
-            rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
-            share_link=$(rclone link E5:/DockerPull/$issue_number/$save_image_name.tar.gz)
-            gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following links: $share_link"
+            args=($issue_title)
+            image_name=""
+            options=()
+            args=("${args[@]:2}")
+            while [[ ${#args[@]} -gt 0 ]]; do
+                case "${args[0]}" in
+                    -a|--all-tags)
+                        options+=("${args[0]}")
+                        args=("${args[@]:1}")
+                        ;;
+                    --disable-content-trust)
+                        options+=("${args[0]}")
+                        args=("${args[@]:1}")
+                        ;;
+                    --platform)
+                        options+=("${args[0]}" "${args[1]}")
+                        args=("${args[@]:2}")
+                        ;;
+                    -q|--quiet)
+                        options+=("${args[0]}")
+                        args=("${args[@]:1}")
+                        ;;
+                    *)
+                        if [[ -z "$image_name" ]]; then
+                            image_name="${args[0]}"
+                        else
+                            options+=("${args[0]}")
+                        fi
+                        args=("${args[@]:1}")
+                        ;;
+                esac
+            done
+            if [[ -n "$image_name" ]]; then
+              save_image_name=${image_name//[:\/ ]/_}
+              docker save $image_name | gzip > ./$save_image_name.tar.gz
+              rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
+              share_link=$(rclone link E5:/DockerPull/$issue_number/$save_image_name.tar.gz)
+              gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following links: $share_link"
+            else
+              echo "No image name found."
+              exit 1
+            fi
           else
             echo "Issue title is invalid."
             exit 1
