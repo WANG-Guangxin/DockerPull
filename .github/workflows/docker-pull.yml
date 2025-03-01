@@ -54,7 +54,7 @@ jobs:
             if [[ -n "$image_name" ]]; then
               save_image_name=${image_name//[:\/ ]/_}
               docker save $image_name | gzip > ./$save_image_name.tar.gz
-              rclone copy ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
+              rclone copy --progress -v ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
               share_link=$(rclone link E5:/DockerPull/$issue_number/$save_image_name.tar.gz)
               gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following links: $share_link"
             else
