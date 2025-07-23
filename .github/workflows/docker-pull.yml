@@ -37,6 +37,10 @@ jobs:
                         options+=("${args[0]}" "${args[1]}")
                         args=("${args[@]:2}")
                         ;;
+                    --platform=*)
+                        options+=("${args[0]}" "${args[1]}")
+                        args=("${args[@]:2}")
+                        ;;
                     -q|--quiet)
                         options+=("${args[0]}")
                         args=("${args[@]:1}")
