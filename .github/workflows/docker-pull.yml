@@ -6,7 +6,6 @@ on:
 jobs:
   new-issue-job:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Check out code
         uses: actions/checkout@v4
