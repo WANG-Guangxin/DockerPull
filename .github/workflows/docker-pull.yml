@@ -13,11 +13,52 @@ jobs:
 
       - name: Docker / Wget / Curl Pull
         run: |
-          set -e
+          set -Eeuo pipefail
 
           issue_title="${{ github.event.issue.title }}"
           issue_number="${{ github.event.issue.number }}"
           echo "=== Issue #${issue_number}: ${issue_title} ==="
+
+          FAILURE_NOTIFIED=0
+          DISK_RESERVE_BYTES=$((2 * 1024 * 1024 * 1024))
+          AVAILABLE_BYTES=$(df --output=avail -B1 . | tail -n1 | tr -d ' ')
+          MAX_FILE_SIZE_BYTES=$((AVAILABLE_BYTES - DISK_RESERVE_BYTES))
+
+          if (( MAX_FILE_SIZE_BYTES <= 0 )); then
+            echo "Insufficient disk budget on runner."
+            exit 1
+          fi
+
+          echo "Download size budget: ${MAX_FILE_SIZE_BYTES} bytes"
+
+          notify_failure() {
+            local exit_code="$1"
+            local failed_command="$2"
+
+            if [[ "$FAILURE_NOTIFIED" -eq 1 ]]; then
+              return
+            fi
+
+            trap - ERR
+            set +e
+            gh issue comment "$issue_number" -b "❌ 任务执行失败。
+
+            **Issue:** \`${issue_title}\`
+            **退出码:** \`${exit_code}\`
+            **失败命令:**
+            \`\`\`
+            ${failed_command}
+            \`\`\`
+
+            请检查命令格式、下载地址是否有效，或稍后重试。"
+            FAILURE_NOTIFIED=1
+          }
+
+          trap 'notify_failure "$?" "$BASH_COMMAND"' ERR
+
+          post_comment() {
+            gh issue comment "$issue_number" -b "$1"
+          }
 
           # 安装 rclone
           if ! command -v rclone &> /dev/null; then
@@ -44,7 +85,8 @@ jobs:
             echo "Command type: curl"
           else
             echo "Invalid issue title format."
-            gh issue comment "$issue_number" -b "❌ Issue 标题格式不正确。
+            FAILURE_NOTIFIED=1
+            post_comment "❌ Issue 标题格式不正确。
 
             请使用以下格式之一：
             - \`docker pull <镜像名>\`
@@ -60,10 +102,16 @@ jobs:
           # ===== Docker Pull =====
           if [[ "$CMD_TYPE" == "docker" ]]; then
             echo "Parsing docker pull arguments..."
-            args=($issue_title)
+            read -r -a args <<< "$TARGET"
             image_name=""
             options=()
-            args=("${args[@]:2}")
+
+            if [[ ${#args[@]} -eq 0 ]]; then
+              FAILURE_NOTIFIED=1
+              post_comment "❌ 未指定镜像名称。"
+              exit 1
+            fi
+
             while [[ ${#args[@]} -gt 0 ]]; do
                 case "${args[0]}" in
                     -a|--all-tags)
@@ -79,6 +127,11 @@ jobs:
                         args=("${args[@]:1}")
                         ;;
                     --platform)
+                        if [[ ${#args[@]} -lt 2 ]]; then
+                          FAILURE_NOTIFIED=1
+                          post_comment "❌ \`docker pull --platform\` 缺少平台参数。"
+                          exit 1
+                        fi
                         options+=("${args[0]}" "${args[1]}")
                         args=("${args[@]:2}")
                         ;;
@@ -98,22 +151,24 @@ jobs:
             done
 
             if [[ -z "$image_name" ]]; then
-              gh issue comment "$issue_number" -b "❌ 未指定镜像名称。"
+              FAILURE_NOTIFIED=1
+              post_comment "❌ 未指定镜像名称。"
               exit 1
             fi
 
             echo "Pulling image: ${image_name}"
-            docker pull ${options[*]} "$image_name"
+            docker pull "${options[@]}" "$image_name"
 
             save_image_name=${image_name//[:\/ ]/_}
             echo "Saving image to ${save_image_name}.tar.gz..."
             docker save "$image_name" | gzip > "./${save_image_name}.tar.gz"
 
             UPLOAD_DIR="DockerPull/${issue_number}/$(date +%Y%m%d_%H%M%S)"
-            rclone copy -v --progress "./${save_image_name}.tar.gz" "E5:${UPLOAD_DIR}/"
+            rclone copy --stats=30s --stats-one-line "./${save_image_name}.tar.gz" "E5:${UPLOAD_DIR}/"
             SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${save_image_name}.tar.gz")
 
-            gh issue comment "$issue_number" -b "✅ Docker 镜像下载成功！
+            FAILURE_NOTIFIED=1
+            post_comment "✅ Docker 镜像下载成功！
 
             **镜像:** \`${image_name}\`
 
@@ -128,21 +183,51 @@ jobs:
           elif [[ "$CMD_TYPE" == "wget" || "$CMD_TYPE" == "curl" ]]; then
             # 清理 URL（去除引号）
             TARGET=$(echo "$TARGET" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+            TARGET=$(echo "$TARGET" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+            if [[ ! "$TARGET" =~ ^https?:// ]]; then
+              FAILURE_NOTIFIED=1
+              post_comment "❌ 仅支持 http/https 下载链接。
+
+              当前输入：\`${TARGET}\`"
+              exit 1
+            fi
+
             echo "Downloading: ${TARGET}"
 
-            # 生成安全的文件名
-            FILENAME=$(echo "$TARGET" | sed 's|[^a-zA-Z0-9._-]|_|g')
-            if [[ -z "$FILENAME" || "$FILENAME" == "_"* ]]; then
+            # 优先使用 URL 最后一级路径作为文件名，避免整条 URL 变成文件名
+            url_without_query="${TARGET%%\?*}"
+            url_without_fragment="${url_without_query%%#*}"
+            filename_candidate="$(basename "$url_without_fragment")"
+            FILENAME=$(echo "$filename_candidate" | sed 's|[^a-zA-Z0-9._-]|_|g')
+            if [[ -z "$FILENAME" || "$FILENAME" == "." || "$FILENAME" == "_"* ]]; then
               FILENAME="download_$(date +%Y%m%d_%H%M%S)"
             fi
             echo "Output filename: ${FILENAME}"
 
+            # 尝试在下载前读取 Content-Length，过大时尽早终止
+            echo "Checking remote file size..."
+            remote_size=$(curl -fsSLI --retry 3 --retry-delay 5 --connect-timeout 20 "$TARGET" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {gsub("\r", "", $2); print $2; exit}') || true
+            if [[ -n "${remote_size:-}" && "$remote_size" =~ ^[0-9]+$ ]]; then
+              echo "Remote file size: ${remote_size} bytes"
+              if (( remote_size > MAX_FILE_SIZE_BYTES )); then
+                FAILURE_NOTIFIED=1
+                post_comment "⚠️ 远程文件大小超过当前 runner 可用容量，已在下载前终止。
+
+                **文件大小:** \`${remote_size}\` bytes
+                **可用预算:** \`${MAX_FILE_SIZE_BYTES}\` bytes"
+                exit 1
+              fi
+            else
+              echo "Remote file size unavailable, continuing download."
+            fi
+
             # 下载文件
             echo "Starting download..."
             if [[ "$CMD_TYPE" == "wget" ]]; then
-              wget -v -O "$FILENAME" "$TARGET"
+              wget --tries=3 --retry-connrefused --waitretry=5 --timeout=30 -nv -O "$FILENAME" -- "$TARGET"
             else
-              curl -fSL -o "$FILENAME" "$TARGET"
+              curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --silent --show-error -o "$FILENAME" -- "$TARGET"
             fi
 
             # 检查文件大小
@@ -150,19 +235,27 @@ jobs:
             FILE_SIZE_BYTES=$(stat -c%s "$FILENAME" 2>/dev/null || echo "0")
             echo "Downloaded file size: ${FILE_SIZE} (${FILE_SIZE_BYTES} bytes)"
 
-            # 检查文件大小是否超过 4GB
-            if [[ $FILE_SIZE_BYTES -gt 4294967296 ]]; then
-              gh issue comment "$issue_number" -b "⚠️ 文件大小超过 4GB，上传可能失败。
+            if [[ "$FILE_SIZE_BYTES" -eq 0 ]]; then
+              FAILURE_NOTIFIED=1
+              post_comment "❌ 下载结果为空文件，已终止上传。"
+              exit 1
+            fi
+
+            # 检查文件大小是否超过当前 runner 可用容量
+            if [[ $FILE_SIZE_BYTES -gt $MAX_FILE_SIZE_BYTES ]]; then
+              FAILURE_NOTIFIED=1
+              post_comment "⚠️ 文件大小超过当前 runner 可用容量，上传已终止。
 
                 文件大小: \`${FILE_SIZE}\`"
               exit 1
             fi
 
-            UPLOAD_DIR="WgetPull/${issue_number}/$(date +%Y%m%d_%H%M%S)"
-            rclone copy -v --progress "$FILENAME" "E5:${UPLOAD_DIR}/"
+            UPLOAD_DIR="Downloads/${issue_number}/$(date +%Y%m%d_%H%M%S)"
+            rclone copy --stats=30s --stats-one-line "$FILENAME" "E5:${UPLOAD_DIR}/"
             SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${FILENAME}")
 
-            gh issue comment "$issue_number" -b "✅ 文件下载成功！
+            FAILURE_NOTIFIED=1
+            post_comment "✅ 文件下载成功！
 
               **文件信息:**
               - 文件名: \`${FILENAME}\`
