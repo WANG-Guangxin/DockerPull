@@ -1,0 +1,113 @@
+name: Wget Pull
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  new-issue-job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Wget Pull
+        run: |
+          set -e
+
+          issue_title="${{ github.event.issue.title }}"
+          issue_number="${{ github.event.issue.number }}"
+          repo="${{ github.repository }}"
+
+          echo "=== Issue #${issue_number}: ${issue_title} ==="
+
+          # 解析命令类型和参数
+          if [[ $issue_title =~ ^wget\ (.+)$ ]]; then
+            CMD_TYPE="wget"
+            URL="${BASH_REMATCH[1]}"
+            echo "Command type: wget"
+          elif [[ $issue_title =~ ^curl\ (.+)$ ]]; then
+            CMD_TYPE="curl"
+            URL="${BASH_REMATCH[1]}"
+            echo "Command type: curl"
+          else
+            echo "Invalid issue title format."
+            echo "Expected: wget <URL> 或 curl <URL>"
+            gh issue comment "$issue_number" -b "❌ Issue 标题格式不正确。
+
+请使用以下格式之一：
+- \`wget <URL>\`
+- \`curl <URL>\`
+
+例如：\`wget https://example.com/file.zip\`"
+            exit 1
+          fi
+
+          # 清理 URL（去除可能的引号）
+          URL=$(echo "$URL" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+          echo "Downloading: ${URL}"
+
+          # 生成安全的文件名
+          FILENAME=$(echo "$URL" | sed 's|[^a-zA-Z0-9._-]|_|g')
+          if [[ -z "$FILENAME" || "$FILENAME" == "_"* ]]; then
+            FILENAME="download_$(date +%Y%m%d_%H%M%S)"
+          fi
+          echo "Output filename: ${FILENAME}"
+
+          # 下载文件
+          echo "Starting download..."
+          if [[ "$CMD_TYPE" == "wget" ]]; then
+            wget -v -O "$FILENAME" "$URL"
+          else
+            curl -fSL -o "$FILENAME" "$URL"
+          fi
+
+          # 检查文件大小
+          FILE_SIZE=$(du -h "$FILENAME" | cut -f1)
+          FILE_SIZE_BYTES=$(stat -c%s "$FILENAME" 2>/dev/null || echo "0")
+          echo "Downloaded file size: ${FILE_SIZE} (${FILE_SIZE_BYTES} bytes)"
+
+          # 检查文件大小是否超过 4GB（rclone 分片上传建议）
+          if [[ $FILE_SIZE_BYTES -gt 4294967296 ]]; then
+            gh issue comment "$issue_number" -b "⚠️ 文件大小超过 4GB，上传可能失败。
+
+文件大小: ${FILE_SIZE}
+建议: 使用分片压缩或减小文件"
+            exit 1
+          fi
+
+          # 安装 rclone（如果未安装）
+          if ! command -v rclone &> /dev/null; then
+            echo "Installing rclone..."
+            curl https://rclone.org/install.sh | sudo bash
+          fi
+
+          # 上传到云存储
+          echo "Uploading to cloud storage..."
+          UPLOAD_DIR="WgetPull/${issue_number}/$(date +%Y%m%d_%H%M%S)"
+          rclone copy -v --progress "$FILENAME" "E5:${UPLOAD_DIR}/"
+
+          # 获取下载链接
+          SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${FILENAME}")
+          echo "Share link: ${SHARE_LINK}"
+
+          # 回复 Issue
+          gh issue comment "$issue_number" -b "✅ 文件下载成功！
+
+**文件信息:**
+- 文件名: \`${FILENAME}\`
+- 文件大小: \`${FILE_SIZE}\`
+
+**下载链接:**
+\`\`\`
+${SHARE_LINK}
+\`\`\`
+
+> ⚠️ 链接有效期请根据云存储设置确认。如果链接失效，请重新提交 Issue。"
+
+          echo "=== Done ==="
+        shell: bash
+        env:
+          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+          GH_TOKEN: ${{ secrets.PAT }}
+          RCLONE_CONFIG: ./config/rclone.conf
