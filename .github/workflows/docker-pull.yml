@@ -46,14 +46,14 @@ jobs:
             echo "Invalid issue title format."
             gh issue comment "$issue_number" -b "❌ Issue 标题格式不正确。
 
-请使用以下格式之一：
-- \`docker pull <镜像名>\`
-- \`wget <URL>\`
-- \`curl <URL>\`
+            请使用以下格式之一：
+            - \`docker pull <镜像名>\`
+            - \`wget <URL>\`
+            - \`curl <URL>\`
 
-例如：
-- \`docker pull nginx:latest\`
-- \`wget https://example.com/file.zip\`"
+            例如：
+            - \`docker pull nginx:latest\`
+            - \`wget https://example.com/file.zip\`"
             exit 1
           fi
 
