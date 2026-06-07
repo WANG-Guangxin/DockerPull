@@ -40,16 +40,16 @@ jobs:
 
             trap - ERR
             set +e
-            gh issue comment "$issue_number" -b "❌ 任务执行失败。
+            gh issue comment "$issue_number" -b "❌ Task failed.
 
             **Issue:** \`${issue_title}\`
-            **退出码:** \`${exit_code}\`
-            **失败命令:**
+            **Exit code:** \`${exit_code}\`
+            **Failed command:**
             \`\`\`
             ${failed_command}
             \`\`\`
 
-            请检查命令格式、下载地址是否有效，或稍后重试。"
+            Please check the command format, verify that the download target is valid, and try again later."
             FAILURE_NOTIFIED=1
           }
 
@@ -83,14 +83,14 @@ jobs:
             ' <<< "$headers"
           }
 
-          # 安装 rclone
+          # Install rclone
           if ! command -v rclone &> /dev/null; then
             echo "Installing rclone..."
             sudo -v; curl https://rclone.org/install.sh | sudo bash
           fi
           rclone version
 
-          # ===== 判断命令类型 =====
+          # ===== Detect command type =====
           CMD_TYPE=""
           TARGET=""
 
@@ -109,14 +109,14 @@ jobs:
           else
             echo "Invalid issue title format."
             FAILURE_NOTIFIED=1
-            post_comment "❌ Issue 标题格式不正确。
+            post_comment "❌ Invalid issue title format.
 
-            请使用以下格式之一：
-            - \`docker pull <镜像名>\`
+            Please use one of the following formats:
+            - \`docker pull <image>\`
             - \`wget <URL>\`
             - \`curl <URL>\`
 
-            例如：
+            Examples:
             - \`docker pull nginx:latest\`
             - \`wget https://example.com/file.zip\`"
             exit 1
@@ -131,7 +131,7 @@ jobs:
 
             if [[ ${#args[@]} -eq 0 ]]; then
               FAILURE_NOTIFIED=1
-              post_comment "❌ 未指定镜像名称。"
+              post_comment "❌ No image name was provided."
               exit 1
             fi
 
@@ -152,7 +152,7 @@ jobs:
                     --platform)
                         if [[ ${#args[@]} -lt 2 ]]; then
                           FAILURE_NOTIFIED=1
-                          post_comment "❌ \`docker pull --platform\` 缺少平台参数。"
+                          post_comment "❌ \`docker pull --platform\` is missing a platform value."
                           exit 1
                         fi
                         options+=("${args[0]}" "${args[1]}")
@@ -175,7 +175,7 @@ jobs:
 
             if [[ -z "$image_name" ]]; then
               FAILURE_NOTIFIED=1
-              post_comment "❌ 未指定镜像名称。"
+              post_comment "❌ No image name was provided."
               exit 1
             fi
 
@@ -191,28 +191,26 @@ jobs:
             SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${save_image_name}.tar.gz")
 
             FAILURE_NOTIFIED=1
-            post_comment "✅ Docker 镜像下载成功！
+            post_comment "✅ Docker image download completed.
 
-            **镜像:** \`${image_name}\`
+            **Image:** \`${image_name}\`
 
-            **下载链接:**
-            \`\`\`
+            **Download link:**
             ${SHARE_LINK}
-            \`\`\`
 
-            > 下载后使用 \`docker load < ${save_image_name}.tar.gz\` 导入镜像。"
+            > After downloading, import the image with \`docker load < ${save_image_name}.tar.gz\`."
 
-          # ===== Wget / Curl 下载 =====
+          # ===== Wget / Curl download =====
           elif [[ "$CMD_TYPE" == "wget" || "$CMD_TYPE" == "curl" ]]; then
-            # 清理 URL（去除引号）
+            # Normalize the URL by removing wrapping quotes
             TARGET=$(echo "$TARGET" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
             TARGET=$(echo "$TARGET" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
             if [[ ! "$TARGET" =~ ^https?:// ]]; then
               FAILURE_NOTIFIED=1
-              post_comment "❌ 仅支持 http/https 下载链接。
+              post_comment "❌ Only http/https download URLs are supported.
 
-              当前输入：\`${TARGET}\`"
+              **Input:** \`${TARGET}\`"
               exit 1
             fi
 
@@ -220,7 +218,7 @@ jobs:
 
             REMOTE_HEADERS=$(get_remote_headers "$TARGET")
 
-            # 优先使用 URL 最后一级路径作为文件名，避免整条 URL 变成文件名
+            # Prefer the last URL path segment as the filename instead of the full URL
             url_without_query="${TARGET%%\?*}"
             url_without_fragment="${url_without_query%%#*}"
             filename_candidate="$(basename "$url_without_fragment")"
@@ -239,24 +237,24 @@ jobs:
             fi
             echo "Output filename: ${FILENAME}"
 
-            # 尝试在下载前读取 Content-Length，过大时尽早终止
+            # Try to read Content-Length before downloading so oversized files can fail fast
             echo "Checking remote file size..."
             remote_size=$(get_header_value "$REMOTE_HEADERS" "content-length")
             if [[ -n "${remote_size:-}" && "$remote_size" =~ ^[0-9]+$ ]]; then
               echo "Remote file size: ${remote_size} bytes"
               if (( remote_size > MAX_FILE_SIZE_BYTES )); then
                 FAILURE_NOTIFIED=1
-                post_comment "⚠️ 远程文件大小超过当前 runner 可用容量，已在下载前终止。
+                post_comment "⚠️ The remote file is larger than the available runner capacity, so the download was stopped before it started.
 
-                **文件大小:** \`${remote_size}\` bytes
-                **可用预算:** \`${MAX_FILE_SIZE_BYTES}\` bytes"
+                **Remote size:** \`${remote_size}\` bytes
+                **Available budget:** \`${MAX_FILE_SIZE_BYTES}\` bytes"
                 exit 1
               fi
             else
               echo "Remote file size unavailable, continuing download."
             fi
 
-            # 下载文件
+            # Download the file
             echo "Starting download..."
             if [[ "$CMD_TYPE" == "wget" ]]; then
               wget --tries=3 --retry-connrefused --waitretry=5 --timeout=30 -nv -O "$FILENAME" -- "$TARGET"
@@ -264,23 +262,23 @@ jobs:
               curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --silent --show-error -o "$FILENAME" -- "$TARGET"
             fi
 
-            # 检查文件大小
+            # Check the downloaded file size
             FILE_SIZE=$(du -h "$FILENAME" | cut -f1)
             FILE_SIZE_BYTES=$(stat -c%s "$FILENAME" 2>/dev/null || echo "0")
             echo "Downloaded file size: ${FILE_SIZE} (${FILE_SIZE_BYTES} bytes)"
 
             if [[ "$FILE_SIZE_BYTES" -eq 0 ]]; then
               FAILURE_NOTIFIED=1
-              post_comment "❌ 下载结果为空文件，已终止上传。"
+              post_comment "❌ The downloaded file is empty, so the upload was cancelled."
               exit 1
             fi
 
-            # 检查文件大小是否超过当前 runner 可用容量
+            # Check whether the file exceeds the current runner capacity
             if [[ $FILE_SIZE_BYTES -gt $MAX_FILE_SIZE_BYTES ]]; then
               FAILURE_NOTIFIED=1
-              post_comment "⚠️ 文件大小超过当前 runner 可用容量，上传已终止。
+              post_comment "⚠️ The downloaded file exceeds the current runner capacity, so the upload was cancelled.
 
-                文件大小: \`${FILE_SIZE}\`"
+                **File size:** \`${FILE_SIZE}\`"
               exit 1
             fi
 
@@ -291,18 +289,16 @@ jobs:
             SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${FILENAME}")
 
             FAILURE_NOTIFIED=1
-            post_comment "✅ 文件下载成功！
+            post_comment "✅ File download completed.
 
-              **文件信息:**
-              - 文件名: \`${FILENAME}\`
-              - 文件大小: \`${FILE_SIZE}\`
+              **File information:**
+              - File name: \`${FILENAME}\`
+              - File size: \`${FILE_SIZE}\`
 
-              **下载链接:**
-              \`\`\`
+              **Download link:**
               ${SHARE_LINK}
-              \`\`\`
 
-              > ⚠️ 链接有效期请根据云存储设置确认。如果链接失效，请重新提交 Issue。"
+              > Check your cloud storage settings for link expiration. If the link expires, submit a new issue."
           fi
 
           echo "=== Done ==="
