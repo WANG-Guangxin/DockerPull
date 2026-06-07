@@ -59,6 +59,30 @@ jobs:
             gh issue comment "$issue_number" -b "$1"
           }
 
+          get_remote_headers() {
+            curl -fsSLI --retry 3 --retry-delay 5 --connect-timeout 20 "$1" || true
+          }
+
+          get_header_value() {
+            local headers="$1"
+            local header_name="$2"
+
+            awk -v header_name="$header_name" '
+              BEGIN { IGNORECASE=1 }
+              $0 ~ "^" header_name ":" {
+                value=$0
+                sub(/^[^:]+:[[:space:]]*/, "", value)
+                gsub("\r", "", value)
+                last=value
+              }
+              END {
+                if (last != "") {
+                  print last
+                }
+              }
+            ' <<< "$headers"
+          }
+
           # 安装 rclone
           if ! command -v rclone &> /dev/null; then
             echo "Installing rclone..."
@@ -194,10 +218,21 @@ jobs:
 
             echo "Downloading: ${TARGET}"
 
+            REMOTE_HEADERS=$(get_remote_headers "$TARGET")
+
             # 优先使用 URL 最后一级路径作为文件名，避免整条 URL 变成文件名
             url_without_query="${TARGET%%\?*}"
             url_without_fragment="${url_without_query%%#*}"
             filename_candidate="$(basename "$url_without_fragment")"
+            content_disposition=$(get_header_value "$REMOTE_HEADERS" "content-disposition")
+            if [[ -n "$content_disposition" && "$content_disposition" =~ filename\*=UTF-8\'\'([^;]+) ]]; then
+              decoded_filename=$(printf '%b' "${BASH_REMATCH[1]//%/\\x}") || decoded_filename=""
+              if [[ -n "$decoded_filename" ]]; then
+                filename_candidate="$decoded_filename"
+              fi
+            elif [[ -n "$content_disposition" && "$content_disposition" =~ filename=\"?([^\";]+) ]]; then
+              filename_candidate="${BASH_REMATCH[1]}"
+            fi
             FILENAME=$(echo "$filename_candidate" | sed 's|[^a-zA-Z0-9._-]|_|g')
             if [[ -z "$FILENAME" || "$FILENAME" == "." || "$FILENAME" == "_"* ]]; then
               FILENAME="download_$(date +%Y%m%d_%H%M%S)"
@@ -206,7 +241,7 @@ jobs:
 
             # 尝试在下载前读取 Content-Length，过大时尽早终止
             echo "Checking remote file size..."
-            remote_size=$(curl -fsSLI --retry 3 --retry-delay 5 --connect-timeout 20 "$TARGET" | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {gsub("\r", "", $2); print $2; exit}') || true
+            remote_size=$(get_header_value "$REMOTE_HEADERS" "content-length")
             if [[ -n "${remote_size:-}" && "$remote_size" =~ ^[0-9]+$ ]]; then
               echo "Remote file size: ${remote_size} bytes"
               if (( remote_size > MAX_FILE_SIZE_BYTES )); then
@@ -250,7 +285,9 @@ jobs:
             fi
 
             UPLOAD_DIR="Downloads/${issue_number}/$(date +%Y%m%d_%H%M%S)"
-            rclone copy --stats=30s --stats-one-line "$FILENAME" "E5:${UPLOAD_DIR}/"
+            echo "Starting upload to E5:${UPLOAD_DIR}/${FILENAME}"
+            rclone copy --stats=1m --stats-one-line "$FILENAME" "E5:${UPLOAD_DIR}/"
+            echo "Upload completed, generating share link..."
             SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${FILENAME}")
 
             FAILURE_NOTIFIED=1
