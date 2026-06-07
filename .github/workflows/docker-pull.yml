@@ -115,14 +115,14 @@ jobs:
 
             gh issue comment "$issue_number" -b "✅ Docker 镜像下载成功！
 
-**镜像:** \`${image_name}\`
+            **镜像:** \`${image_name}\`
 
-**下载链接:**
-\`\`\`
-${SHARE_LINK}
-\`\`\`
+            **下载链接:**
+            \`\`\`
+            ${SHARE_LINK}
+            \`\`\`
 
-> 下载后使用 \`docker load < ${save_image_name}.tar.gz\` 导入镜像。"
+            > 下载后使用 \`docker load < ${save_image_name}.tar.gz\` 导入镜像。"
 
           # ===== Wget / Curl 下载 =====
           elif [[ "$CMD_TYPE" == "wget" || "$CMD_TYPE" == "curl" ]]; then
@@ -154,7 +154,7 @@ ${SHARE_LINK}
             if [[ $FILE_SIZE_BYTES -gt 4294967296 ]]; then
               gh issue comment "$issue_number" -b "⚠️ 文件大小超过 4GB，上传可能失败。
 
-文件大小: \`${FILE_SIZE}\`"
+                文件大小: \`${FILE_SIZE}\`"
               exit 1
             fi
 
@@ -164,16 +164,16 @@ ${SHARE_LINK}
 
             gh issue comment "$issue_number" -b "✅ 文件下载成功！
 
-**文件信息:**
-- 文件名: \`${FILENAME}\`
-- 文件大小: \`${FILE_SIZE}\`
+              **文件信息:**
+              - 文件名: \`${FILENAME}\`
+              - 文件大小: \`${FILE_SIZE}\`
 
-**下载链接:**
-\`\`\`
-${SHARE_LINK}
-\`\`\`
+              **下载链接:**
+              \`\`\`
+              ${SHARE_LINK}
+              \`\`\`
 
-> ⚠️ 链接有效期请根据云存储设置确认。如果链接失效，请重新提交 Issue。"
+              > ⚠️ 链接有效期请根据云存储设置确认。如果链接失效，请重新提交 Issue。"
           fi
 
           echo "=== Done ==="
