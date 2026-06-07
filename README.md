@@ -1,12 +1,30 @@
 ## Docker Pull 🗽
 
-Docker 镜像下载机器人
+Docker 镜像 / 文件下载机器人
 
 ### 使用方法
 
-为本仓库提交 Issue，标题是你要执行的 docker pull 命令。
+为本仓库提交 Issue，标题是你要执行的命令。
 
-例如，你要下载 `nginx` 镜像，issue 标题写 `docker pull nginx`。
+#### 支持的命令
+
+**1. Docker 镜像下载**
+```
+docker pull <镜像名>
+```
+例如：`docker pull nginx:latest`
+
+**2. Wget 下载**
+```
+wget <URL>
+```
+例如：`wget https://example.com/file.zip`
+
+**3. Curl 下载**
+```
+curl <URL>
+```
+例如：`curl https://example.com/file.zip`
 
 ![](./image/000.png)
 
@@ -15,8 +33,6 @@ Docker 镜像下载机器人
 ![](./image/001.png)
 
 点击下载链接，把它下载到本地。
-
-然后执行命令 `docker load < nginx.tar.gz` 即可。
 
 > 如果它帮到你，请给它一个 Star ⭐️
 > 

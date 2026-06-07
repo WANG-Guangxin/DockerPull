@@ -6,19 +6,60 @@ on:
 jobs:
   new-issue-job:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Docker Pull
-        run: |          
-          sudo -v; curl https://rclone.org/install.sh | sudo bash
-          rclone version
+      - name: Docker / Wget / Curl Pull
+        run: |
+          set -e
+
           issue_title="${{ github.event.issue.title }}"
           issue_number="${{ github.event.issue.number }}"
+          echo "=== Issue #${issue_number}: ${issue_title} ==="
+
+          # 安装 rclone
+          if ! command -v rclone &> /dev/null; then
+            echo "Installing rclone..."
+            sudo -v; curl https://rclone.org/install.sh | sudo bash
+          fi
+          rclone version
+
+          # ===== 判断命令类型 =====
+          CMD_TYPE=""
+          TARGET=""
+
           if [[ $issue_title =~ ^docker\ pull\ (.+)$ ]]; then
-            echo "Issue title is valid."
-            $issue_title
+            CMD_TYPE="docker"
+            TARGET="${BASH_REMATCH[1]}"
+            echo "Command type: docker pull"
+          elif [[ $issue_title =~ ^wget\ (.+)$ ]]; then
+            CMD_TYPE="wget"
+            TARGET="${BASH_REMATCH[1]}"
+            echo "Command type: wget"
+          elif [[ $issue_title =~ ^curl\ (.+)$ ]]; then
+            CMD_TYPE="curl"
+            TARGET="${BASH_REMATCH[1]}"
+            echo "Command type: curl"
+          else
+            echo "Invalid issue title format."
+            gh issue comment "$issue_number" -b "❌ Issue 标题格式不正确。
+
+请使用以下格式之一：
+- \`docker pull <镜像名>\`
+- \`wget <URL>\`
+- \`curl <URL>\`
+
+例如：
+- \`docker pull nginx:latest\`
+- \`wget https://example.com/file.zip\`"
+            exit 1
+          fi
+
+          # ===== Docker Pull =====
+          if [[ "$CMD_TYPE" == "docker" ]]; then
+            echo "Parsing docker pull arguments..."
             args=($issue_title)
             image_name=""
             options=()
@@ -55,20 +96,87 @@ jobs:
                         ;;
                 esac
             done
-            if [[ -n "$image_name" ]]; then
-              save_image_name=${image_name//[:\/ ]/_}
-              docker save $image_name | gzip > ./$save_image_name.tar.gz
-              rclone copy --progress -v ./$save_image_name.tar.gz E5:/DockerPull/$issue_number/
-              share_link=$(rclone link E5:/DockerPull/$issue_number/$save_image_name.tar.gz)
-              gh issue comment ${{ github.event.issue.number }} -b "Docker image has been pulled and uploaded to E5. Please download it from the following links: $share_link"
-            else
-              echo "No image name found."
+
+            if [[ -z "$image_name" ]]; then
+              gh issue comment "$issue_number" -b "❌ 未指定镜像名称。"
               exit 1
             fi
-          else
-            echo "Issue title is invalid."
-            exit 1
+
+            echo "Pulling image: ${image_name}"
+            docker pull ${options[*]} "$image_name"
+
+            save_image_name=${image_name//[:\/ ]/_}
+            echo "Saving image to ${save_image_name}.tar.gz..."
+            docker save "$image_name" | gzip > "./${save_image_name}.tar.gz"
+
+            UPLOAD_DIR="DockerPull/${issue_number}/$(date +%Y%m%d_%H%M%S)"
+            rclone copy -v --progress "./${save_image_name}.tar.gz" "E5:${UPLOAD_DIR}/"
+            SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${save_image_name}.tar.gz")
+
+            gh issue comment "$issue_number" -b "✅ Docker 镜像下载成功！
+
+**镜像:** \`${image_name}\`
+
+**下载链接:**
+\`\`\`
+${SHARE_LINK}
+\`\`\`
+
+> 下载后使用 \`docker load < ${save_image_name}.tar.gz\` 导入镜像。"
+
+          # ===== Wget / Curl 下载 =====
+          elif [[ "$CMD_TYPE" == "wget" || "$CMD_TYPE" == "curl" ]]; then
+            # 清理 URL（去除引号）
+            TARGET=$(echo "$TARGET" | sed 's/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+            echo "Downloading: ${TARGET}"
+
+            # 生成安全的文件名
+            FILENAME=$(echo "$TARGET" | sed 's|[^a-zA-Z0-9._-]|_|g')
+            if [[ -z "$FILENAME" || "$FILENAME" == "_"* ]]; then
+              FILENAME="download_$(date +%Y%m%d_%H%M%S)"
+            fi
+            echo "Output filename: ${FILENAME}"
+
+            # 下载文件
+            echo "Starting download..."
+            if [[ "$CMD_TYPE" == "wget" ]]; then
+              wget -v -O "$FILENAME" "$TARGET"
+            else
+              curl -fSL -o "$FILENAME" "$TARGET"
+            fi
+
+            # 检查文件大小
+            FILE_SIZE=$(du -h "$FILENAME" | cut -f1)
+            FILE_SIZE_BYTES=$(stat -c%s "$FILENAME" 2>/dev/null || echo "0")
+            echo "Downloaded file size: ${FILE_SIZE} (${FILE_SIZE_BYTES} bytes)"
+
+            # 检查文件大小是否超过 4GB
+            if [[ $FILE_SIZE_BYTES -gt 4294967296 ]]; then
+              gh issue comment "$issue_number" -b "⚠️ 文件大小超过 4GB，上传可能失败。
+
+文件大小: \`${FILE_SIZE}\`"
+              exit 1
+            fi
+
+            UPLOAD_DIR="WgetPull/${issue_number}/$(date +%Y%m%d_%H%M%S)"
+            rclone copy -v --progress "$FILENAME" "E5:${UPLOAD_DIR}/"
+            SHARE_LINK=$(rclone link "E5:${UPLOAD_DIR}/${FILENAME}")
+
+            gh issue comment "$issue_number" -b "✅ 文件下载成功！
+
+**文件信息:**
+- 文件名: \`${FILENAME}\`
+- 文件大小: \`${FILE_SIZE}\`
+
+**下载链接:**
+\`\`\`
+${SHARE_LINK}
+\`\`\`
+
+> ⚠️ 链接有效期请根据云存储设置确认。如果链接失效，请重新提交 Issue。"
           fi
+
+          echo "=== Done ==="
         shell: bash
         env:
           RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
