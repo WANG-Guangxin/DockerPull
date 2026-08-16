@@ -1,0 +1,50 @@
+name: Refresh rclone config
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dockerpull-rclone-config
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Install rclone
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rclone >/dev/null 2>&1; then
+            curl https://rclone.org/install.sh | sudo bash
+          fi
+          rclone version
+
+      - name: Check OneDrive and refresh token
+        shell: bash
+        env:
+          RCLONE_CONFIG: ${{ github.workspace }}/config/rclone.conf
+          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+        run: |
+          set -euo pipefail
+          : "${RCLONE_CONFIG_PASS:?RCLONE_CONFIG_PASS is not configured}"
+          rclone lsd E5:
+
+      - name: Commit refreshed rclone config
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore: refresh rclone config [skip ci]"
+          file_pattern: config/rclone.conf
+          disable_globbing: true
