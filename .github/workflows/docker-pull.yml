@@ -21,6 +21,13 @@ jobs:
           rclone version
         shell: bash
 
+      - name: Check E5 quota and clean old uploads if needed
+        run: python3 scripts/cleanup_old_uploads.py --apply
+        shell: bash
+        env:
+          RCLONE_CONFIG_PASS: ${{ secrets.RCLONE_CONFIG_PASS }}
+          RCLONE_CONFIG: ./config/rclone.conf
+
       - name: Run download bot
         run: |
           set -euo pipefail

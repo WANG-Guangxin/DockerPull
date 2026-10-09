@@ -524,9 +524,8 @@ def ensure_nonempty_file(file_path: Path) -> int:
     return size
 
 
-def upload_and_link(local_path: Path, remote: str, issue_number: int, prefix: str) -> str:
-    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    upload_dir = f"{prefix}/{issue_number}/{timestamp}"
+def upload_and_link(local_path: Path, remote: str, issue_number: int) -> str:
+    upload_dir = f"DockerPull/{issue_number}"
     print(f"Starting upload to {remote}:{upload_dir}/{local_path.name}")
     run_command(["rclone", "copy", "--stats=1m", "--stats-one-line", str(local_path), f"{remote}:{upload_dir}/"])
     print("Upload completed, generating share link...")
@@ -551,13 +550,14 @@ def run_docker_plan(plan: DockerPlan, *, issue_number: int, remote: str) -> str:
     if return_code != 0:
         raise WorkflowError("❌ Failed to export the Docker image archive.")
 
-    share_link = upload_and_link(output_path, remote, issue_number, "DockerPull")
+    share_link = upload_and_link(output_path, remote, issue_number)
     return (
         "✅ Docker image download completed.\n\n"
         f"**Image:** `{plan.image_name}`\n\n"
         "**Download link:**\n"
         f"{share_link}\n\n"
-        f"> After downloading, import the image with `docker load < {output_path.name}`."
+        f"> After downloading, import the image with `docker load < {output_path.name}`.\n\n"
+        "> This image may be permanently deleted later to free up cloud storage space."
     )
 
 
@@ -624,7 +624,7 @@ def run_download_plan(plan: DownloadPlan, *, issue_number: int, remote: str, dis
             f"**File size:** `{human_size(file_size)}`"
         )
 
-    share_link = upload_and_link(output_path, remote, issue_number, "Downloads")
+    share_link = upload_and_link(output_path, remote, issue_number)
     return (
         "✅ File download completed.\n\n"
         "**File information:**\n"
@@ -632,6 +632,7 @@ def run_download_plan(plan: DownloadPlan, *, issue_number: int, remote: str, dis
         f"- File size: `{human_size(file_size)}`\n\n"
         "**Download link:**\n"
         f"{share_link}\n\n"
+        "> This file may be permanently deleted later to free up cloud storage space.\n\n"
         "> Check your cloud storage settings for link expiration. If the link expires, submit a new issue."
     )
 
