@@ -556,8 +556,8 @@ def run_docker_plan(plan: DockerPlan, *, issue_number: int, remote: str) -> str:
         f"**Image:** `{plan.image_name}`\n\n"
         "**Download link:**\n"
         f"{share_link}\n\n"
-        f"> After downloading, import the image with `docker load < {output_path.name}`.\n\n"
-        "> This image may be permanently deleted later to free up cloud storage space."
+        f"After downloading, import the image with `docker load < {output_path.name}`.\n\n"
+        "This image may be permanently deleted later to free up cloud storage space. If the link expires, submit a new issue."
     )
 
 
@@ -632,8 +632,7 @@ def run_download_plan(plan: DownloadPlan, *, issue_number: int, remote: str, dis
         f"- File size: `{human_size(file_size)}`\n\n"
         "**Download link:**\n"
         f"{share_link}\n\n"
-        "> This file may be permanently deleted later to free up cloud storage space.\n\n"
-        "> Check your cloud storage settings for link expiration. If the link expires, submit a new issue."
+        "This file may be permanently deleted later to free up cloud storage space. If the link expires, submit a new issue.\n\n"
     )
 
 
